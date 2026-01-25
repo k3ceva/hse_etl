@@ -1,0 +1,79 @@
+version: '3.8'
+ 
+services:
+  postgres:
+    image: postgres:16
+    container_name: de-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ./airflow/data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+ 
+  # Инициализация БД Airflow — выполняется один раз
+  airflow-init:
+    image: apache/airflow:2.9.3
+    container_name: de-airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+    command: >
+      bash -c "
+      airflow db init &&
+      airflow users create -r Admin -u admin -f Admin -l User -p admin --email admin@example.com || echo 'Admin user already exists'
+      "
+    restart: "no"  # Запускается один раз
+ 
+  # Веб-сервер Airflow
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: de-airflow-web
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully  # Ждёт успешного завершения инициализации
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "airflow", "db", "check"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+ 
+  # Планировщик Airflow
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: de-airflow-scheduler
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+    command: scheduler
+    restart: unless-stopped
