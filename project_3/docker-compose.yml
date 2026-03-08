@@ -1,0 +1,105 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:13
+    container_name: airflow_postgres
+    network_mode: host
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: airflow_redis
+    network_mode: host
+    ports:
+      - "6379:6379"
+
+  airflow-webserver:
+    image: apache/airflow:2.11.1
+    container_name: airflow_webserver
+    network_mode: host
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@localhost:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://localhost:6379/0
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKEND: airflow.api.auth.backend.basic_auth
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./requirements.txt:/requirements.txt
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        airflow webserver
+      "
+
+  airflow-scheduler:
+    image: apache/airflow:2.11.1
+    container_name: airflow_scheduler
+    network_mode: host
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@localhost:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://localhost:6379/0
+      AIRFLOW__CORE__FERNET_KEY: ''
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        airflow scheduler
+      "
+
+  airflow-worker:
+    image: apache/airflow:2.11.1
+    container_name: airflow_worker
+    network_mode: host
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@localhost:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://localhost:6379/0
+      AIRFLOW__CORE__FERNET_KEY: ''
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        airflow celery worker
+      "
+
+volumes:
+  postgres_data:
